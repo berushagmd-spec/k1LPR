@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
-import json
-import time
+import json, time
 from pathlib import Path
 from typing import Any, Dict
-
 
 class BotState:
     def __init__(self, path: str, defaults: Dict[str, Any]):
@@ -20,32 +18,19 @@ class BotState:
                 loaded = {}
         else:
             loaded = {}
-
         self.data = dict(self.defaults)
         self.data.update(loaded)
-
         self.data.setdefault("active_incidents", [])
         self.data.setdefault("last_posts", [])
         self.data.setdefault("created_at", int(time.time()))
         self.save()
 
     def save(self) -> None:
-        self.path.write_text(
-            json.dumps(self.data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-
-    def set(self, key: str, value: Any) -> None:
-        self.data[key] = value
-        self.save()
+        self.path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def append_post(self, text: str) -> None:
-        item = {
-            "ts": int(time.time()),
-            "text": text,
-        }
         posts = self.data.setdefault("last_posts", [])
-        posts.append(item)
+        posts.append({"ts": int(time.time()), "text": text})
         self.data["last_posts"] = posts[-20:]
         self.save()
 
