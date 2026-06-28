@@ -9,12 +9,12 @@ KURBANIA_ZONES = {
     "southwest_middle": {"region": "Форская область", "depth": "middle", "direction": "юго-запад", "places": ["Вейла", "Ал", "Гоный Ал", "Евгено-Форов", "Малый Фор", "Кужда"]},
     "west_middle": {"region": "Моноройская область", "depth": "middle", "direction": "запад", "places": ["Моноройск", "Гера", "Наржа", "Зеленостопль"]},
     "northwest_middle": {"region": "Сугдинская область", "depth": "middle", "direction": "северо-запад", "places": ["Озерослав", "Ромашка", "Рекаль"]},
-    "north_middle": {"region": "Ангераская область", "depth": "middle", "direction": "север", "places": ["Ангерас", "Доковы", "Доброгород"]},
+    "north_middle": {"region": "Ангерская область", "depth": "middle", "direction": "север", "places": ["Ангерас", "Доковы", "Доброгород"]},
 
     "center_rear": {"region": "Озерославская область", "depth": "rear", "direction": "центр", "places": ["Озерославск", "Алержа"]},
     "kurb_rear": {"region": "Курбская область", "depth": "rear", "direction": "центр", "places": ["Курбск", "Дель", "Обищина", "Зелен"]},
     "verh_rear": {"region": "Верходиямская область", "depth": "rear", "direction": "центр", "places": ["Верходияма", "Дияга"]},
-    "east_rear": {"region": "Ангераская область", "depth": "rear", "direction": "восток", "places": ["Ебаз", "Шенматор", "Кельматор"]},
+    "east_rear": {"region": "Ангерская область", "depth": "rear", "direction": "восток", "places": ["Ебаз", "Шенматор", "Кельматор"]},
 
     "diyam_region": {"region": "Диямская область", "depth": "rear", "direction": "восток", "places": ["Великий", "Фердель", "Оробож", "Нелян"]},
     "diyam_agglomeration": {"region": "Диямская агломерация", "depth": "rear", "direction": "восток", "places": ["Дияма", "Рейла", "Пуснарь", "Зелемай", "Хладский"]},
@@ -24,19 +24,21 @@ KURBANIA_ZONES = {
 }
 
 THREAT_BY_DEPTH = {
-    "close": ["artillery", "aviation", "ballistic", "missile", "fpv", "bpla"],
-    "middle": ["artillery", "aviation", "ballistic", "missile", "bpla"],
-    "rear": ["aviation", "ballistic", "missile", "bpla"],
-    "far": ["aviation", "ballistic", "missile"],
+    # БПЛА и FPV только для ближайших зон. В постах это слово не выводится.
+    "close": ["artillery", "aviation", "ballistic", "missile", "combined", "fpv", "bpla"],
+    "middle": ["artillery", "aviation", "ballistic", "missile", "combined"],
+    "rear": ["aviation", "ballistic", "missile", "combined"],
+    "far": ["aviation", "ballistic", "missile", "combined"],
 }
 
 SCENARIO_ALLOWED = {
-    "mixed": ["artillery", "aviation", "ballistic", "missile", "fpv", "bpla"],
+    "mixed": ["artillery", "aviation", "ballistic", "missile", "combined", "fpv", "bpla"],
     "bpla": ["bpla"],
-    "missile": ["missile", "ballistic"],
-    "ballistic": ["ballistic"],
-    "aviation": ["aviation", "missile", "ballistic"],
+    "missile": ["missile", "ballistic", "combined"],
+    "ballistic": ["ballistic", "combined"],
+    "aviation": ["aviation", "missile", "ballistic", "combined"],
     "artillery": ["artillery"],
+    "combined": ["combined"],
 }
 
 MODE_SETTINGS = {
@@ -47,10 +49,10 @@ MODE_SETTINGS = {
 }
 
 THREAT_WEIGHTS_BY_MODE = {
-    "calm": {"bpla": 1, "fpv": 1, "artillery": 5, "aviation": 6, "missile": 5, "ballistic": 6},
-    "normal": {"bpla": 1, "fpv": 1, "artillery": 6, "aviation": 7, "missile": 6, "ballistic": 8},
-    "hot": {"bpla": 1, "fpv": 1, "artillery": 7, "aviation": 8, "missile": 7, "ballistic": 9},
-    "chaos": {"bpla": 1, "fpv": 2, "artillery": 8, "aviation": 9, "missile": 8, "ballistic": 10},
+    "calm": {"bpla": 1, "fpv": 1, "artillery": 5, "aviation": 6, "missile": 5, "ballistic": 6, "combined": 4},
+    "normal": {"bpla": 1, "fpv": 1, "artillery": 6, "aviation": 7, "missile": 6, "ballistic": 8, "combined": 5},
+    "hot": {"bpla": 1, "fpv": 1, "artillery": 7, "aviation": 8, "missile": 7, "ballistic": 9, "combined": 7},
+    "chaos": {"bpla": 1, "fpv": 2, "artillery": 8, "aviation": 9, "missile": 8, "ballistic": 10, "combined": 9},
 }
 
 DIRECTIONS_TEXT = {
@@ -70,16 +72,34 @@ MISSILE_TYPES = {
 AVIATION_TYPES = ["И-29 «Сокол»", "И-27 «Ветер»", "И-30 «Коршун»", "БР-24 «Горн»", "ША-25 «Кабан»"]
 
 ALERT_DIRECTIONS = [
-    "Форскую область",
-    "Моноройскую область",
-    "Алугданскую область",
-    "Сугдинскую область",
-    "Озерославскую область",
-    "Курбскую область",
-    "Верходиямскую область",
-    "Диямскую область",
-    "Диямскую агломерацию",
-    "Ангераскую область",
-    "Дамельскую область",
+    "Форская область",
+    "Моноройская область",
+    "Алугданская область",
+    "Сугдинская область",
+    "Озерославская область",
+    "Курбская область",
+    "Верходиямская область",
+    "Диямская область",
+    "Диямская агломерация",
+    "Ангерская область",
+    "Дамельская область",
     "Нельский округ",
+]
+
+
+# Области/субъекты Турбании, откуда фиксируются пуски/вылеты.
+# Список жёсткий. Другие субъекты источниками пусков не используются.
+# Для артиллерии источник не выводится.
+TURBANIA_LAUNCH_REGIONS_BY_THREAT = {
+    "missile": ["Новотурбанская область", "Турбанов-ярская область"],
+    "aviation": ["Новотурбанская область", "Турбанов-ярская область"],
+    "ballistic": ["Лесопольский АО", "Тихоборская Республика"],
+}
+
+COMBINED_ATTACK_TYPES = [
+    "ракеты + авиация",
+    "баллистика + авиация",
+    "ракеты + баллистика",
+    "авиация + ракетная угроза",
+    "баллистика + ракетная угроза",
 ]

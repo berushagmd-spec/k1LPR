@@ -10,9 +10,11 @@ from data import (
     DIRECTIONS_TEXT,
     MISSILE_TYPES,
     AVIATION_TYPES,
+    TURBANIA_LAUNCH_REGIONS_BY_THREAT,
+    COMBINED_ATTACK_TYPES,
 )
 
-DANGERS_WITH_SIREN = {"artillery", "missile", "ballistic", "aviation"}
+DANGERS_WITH_SIREN = {"artillery", "missile", "ballistic", "aviation", "combined"}
 
 def _pick_zone(state: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     zones = list(KURBANIA_ZONES.items())
@@ -61,22 +63,25 @@ def _direction_phrase(zone: Dict[str, Any]) -> str:
     return random.choice(DIRECTIONS_TEXT.get(zone["direction"], ["по направлению"]))
 
 def _direction_target(zone: Dict[str, Any]) -> str:
-    region = zone.get("region", "")
-    mapping = {
-        "Форская область": "Форскую область",
-        "Моноройская область": "Моноройскую область",
-        "Алугданская область": "Алугданскую область",
-        "Сугдинская область": "Сугдинскую область",
-        "Озерославская область": "Озерославскую область",
-        "Курбская область": "Курбскую область",
-        "Верходиямская область": "Верходиямскую область",
-        "Диямская область": "Диямскую область",
-        "Диямская агломерация": "Диямскую агломерацию",
-        "Ангераская область": "Ангераскую область",
-        "Дамельская область": "Дамельскую область",
-        "Курбская область, Нельский округ": "Нельский округ",
-    }
-    return mapping.get(region, region)
+    # Важно: названия субъектов НЕ склоняем.
+    # Канальный стиль использует только именительный падеж:
+    # "В направлении: Диямская агломерация", а не "Диямскую агломерацию".
+    return zone.get("region", "")
+
+def _origin_for_threat(threat: str) -> str:
+    if threat == "ballistic":
+        return random.choice(TURBANIA_LAUNCH_REGIONS_BY_THREAT["ballistic"])
+    if threat == "aviation":
+        return random.choice(TURBANIA_LAUNCH_REGIONS_BY_THREAT["aviation"])
+    return random.choice(TURBANIA_LAUNCH_REGIONS_BY_THREAT["missile"])
+
+def _origin_for_component(component: str) -> str:
+    if component == "ballistic":
+        return random.choice(TURBANIA_LAUNCH_REGIONS_BY_THREAT["ballistic"])
+    if component == "aviation":
+        return random.choice(TURBANIA_LAUNCH_REGIONS_BY_THREAT["aviation"])
+    return random.choice(TURBANIA_LAUNCH_REGIONS_BY_THREAT["missile"])
+
 
 def _attention(threat: str) -> str:
     if threat == "artillery":
@@ -91,11 +96,22 @@ def _attention(threat: str) -> str:
         return random.choice(["Немедленно в укрытия", "Время реакции минимальное", "Не находиться у окон", "Укрытия и подвальные помещения"])
     if threat == "aviation":
         return random.choice(["Внимание по небу", "Возможна работа авиации", "Сохранять укрытия до отбоя"])
+    if threat == "combined":
+        return random.choice(["Немедленно в укрытия", "Не игнорируйте сигнал тревоги", "Укрытия и подвальные помещения", "Сохранять укрытия до отбоя"])
     return ""
 
 def _set_air_alert_next(data: Dict[str, Any], city: str) -> None:
     data["pending_air_alert"] = {"city": city, "ts": int(time.time())}
     data["urgent_next"] = True
+
+def _set_reaction_posts(data: Dict[str, Any], city: str) -> None:
+    # Иногда перед сиреной идет отдельный пост о работе ПВО.
+    if random.random() < 0.38:
+        _set_pvo_next(data, city)
+        data["pending_air_alert"] = {"city": city, "ts": int(time.time())}
+    else:
+        _set_air_alert_next(data, city)
+
 
 def _set_clear_air_alert_next(data: Dict[str, Any], city: str) -> None:
     data["pending_clear_air_alert"] = {"city": city, "ts": int(time.time())}
@@ -111,6 +127,16 @@ def _clear_air_alert_message(pending: Dict[str, Any], data: Dict[str, Any]) -> s
     data["last_event_kind"] = "clear_air_alert"
     return f"{city}\n✅ОТБОЙ ВОЗДУШНОЙ ТРЕВОГИ✅"
 
+def _set_pvo_next(data: Dict[str, Any], place: str) -> None:
+    data["pending_pvo"] = {"place": place, "ts": int(time.time())}
+    data["urgent_next"] = True
+
+def _pvo_message(pending: Dict[str, Any], data: Dict[str, Any]) -> str:
+    place = pending.get("place", "Дияма")
+    data["last_event_kind"] = "pvo"
+    return f"{place}\nРабота ПВО"
+
+
 def _new_message(threat: str, zone: Dict[str, Any], places: str) -> str:
     region = zone["region"]
     att = _attention(threat)
@@ -120,9 +146,10 @@ def _new_message(threat: str, zone: Dict[str, Any], places: str) -> str:
         "artillery": ["{places}\n{region}\nАртиллерийская тревога\n{att}", "{places}\n{region}\nОпасность артиллерийского обстрела\n{att}", "{places}\n{region}\nВнимание по артиллерии\n{att}"],
         "missile": ["{region}\nРакетная опасность", "{places}\n{region}\nРАКЕТНАЯ ОПАСНОСТЬ\n{att}", "{region}\nУгроза ракетного удара\n{att}", "{places}\n{region}\nТревога по ракетной угрозе"],
         "ballistic": ["{region}\nБаллистическая опасность\n{att}", "{places}\n{region}\nБАЛЛИСТИЧЕСКАЯ УГРОЗА\n{att}", "{region}\nУгроза баллистики\n{att}", "{places}\n{region}\nТревога по баллистике"],
+        "combined": ["{places}\n{region}\nКомбинированная атака\n{combo}\n{att}", "{region}\nКОМБИНИРОВАННАЯ ОПАСНОСТЬ\n{combo}\n{att}", "{places}\n{region}\nТревога по комбинированной атаке\n{combo}"],
         "aviation": ["{places}\n{region}\nАвиационно-ракетно-бомбовая опасность", "{region}\nАвиационная опасность\n{places}", "{places}\n{region}\nТревога по авиации\n{att}", "{places}\n{region}\nАвиационная и ракетная опасность"],
     }
-    return _clean(random.choice(templates[threat]).format(places=places, region=region, att=att))
+    return _clean(random.choice(templates[threat]).format(places=places, region=region, att=att, combo=random.choice(COMBINED_ATTACK_TYPES)))
 
 def _zone_key_by_obj(zone: Dict[str, Any]) -> str:
     for key, value in KURBANIA_ZONES.items():
@@ -136,18 +163,45 @@ def _zone_key_by_obj(zone: Dict[str, Any]) -> str:
 def _prealert_message(threat: str, zone: Dict[str, Any]) -> Dict[str, Any]:
     target = _direction_target(zone)
     places = _places_line(zone)
+
     if threat in ("missile", "ballistic"):
+        origin = _origin_for_threat(threat)
         rocket = random.choice(MISSILE_TYPES.get(threat, MISSILE_TYPES["missile"]))
         if random.choice(["fixation", "launch"]) == "launch":
-            text = f"Пуски ракет ({rocket})\nВ направлении {target}"
+            text = f"Пуски ракет ({rocket})\nРайон пуска: {origin}\nВ направлении: {target}"
         else:
-            text = f"Фиксация ракет ({rocket})\nВ направлении {target}"
+            text = f"Фиксация ракет ({rocket})\nРайон пуска: {origin}\nВ направлении: {target}"
+
+    elif threat == "combined":
+        combo = random.choice(COMBINED_ATTACK_TYPES)
+
+        if "баллистика" in combo:
+            missile_component = "ballistic"
+        else:
+            missile_component = "missile"
+
+        rocket = random.choice(MISSILE_TYPES.get(missile_component, MISSILE_TYPES["missile"]))
+        aircraft = random.choice(AVIATION_TYPES)
+        launch_origin = _origin_for_component(missile_component)
+        aviation_origin = _origin_for_component("aviation")
+
+        text = (
+            f"Фиксация комбинированной атаки ({combo})\n"
+            f"Ракетный компонент: {rocket}\n"
+            f"Авиационный компонент: {aircraft}\n"
+            f"Район пуска: {launch_origin}\n"
+            f"Район вылета: {aviation_origin}\n"
+            f"В направлении: {target}"
+        )
+
     else:
+        origin = _origin_for_threat("aviation")
         aircraft = random.choice(AVIATION_TYPES)
         if random.choice(["flight", "fixation"]) == "flight":
-            text = f"Пролёт авиации ({aircraft})\nВ направлении {target}"
+            text = f"Пролёт авиации ({aircraft})\nРайон вылета: {origin}\nВ направлении: {target}"
         else:
-            text = f"Фиксация авиации ({aircraft})\nВ направлении {target}"
+            text = f"Фиксация авиации ({aircraft})\nРайон вылета: {origin}\nВ направлении: {target}"
+
     return {
         "text": _clean(text),
         "threat": threat,
@@ -177,6 +231,13 @@ def _danger_after_prealert(pending: Dict[str, Any], data: Dict[str, Any]) -> str
             f"{region}\nРакетная опасность",
             f"{places}\n{region}\nТревога по ракетной угрозе",
         ])
+    elif threat == "combined":
+        combo = random.choice(COMBINED_ATTACK_TYPES)
+        text = random.choice([
+            f"{places}\n{region}\nКОМБИНИРОВАННАЯ ОПАСНОСТЬ\n{combo}\n{_attention('combined')}",
+            f"{places}\n{region}\nКомбинированная атака\n{combo}",
+            f"{region}\nТревога по комбинированной атаке\n{combo}\n{_attention('combined')}",
+        ])
     else:
         text = random.choice([
             f"{places}\n{region}\nАвиационная опасность",
@@ -194,12 +255,12 @@ def _danger_after_prealert(pending: Dict[str, Any], data: Dict[str, Any]) -> str
         "threat": threat,
     })
     data["active_incidents"] = data["active_incidents"][-30:]
-    _set_air_alert_next(data, city)
+    _set_reaction_posts(data, city)
     data["last_event_kind"] = "danger"
     return _clean(text)
 
 def _should_make_prealert(threat: str, state: Dict[str, Any]) -> bool:
-    if threat not in ("missile", "ballistic", "aviation"):
+    if threat not in ("missile", "ballistic", "aviation", "combined"):
         return False
     scenario = state.get("scenario", "mixed")
     mode = state.get("mode", "normal")
@@ -216,6 +277,7 @@ def _clear_message(i: Dict[str, Any]) -> str:
         "artillery": ["{p}\n{r}\nОтбой артиллерийской тревоги", "{r}\nОтбой артиллерийской опасности"],
         "missile": ["{r}\nОтбой ракетной опасности", "{p}\n{r}\nОТБОЙ РАКЕТНОЙ ОПАСНОСТИ"],
         "ballistic": ["{r}\nОтбой баллистической опасности", "{p}\n{r}\nОТБОЙ БАЛЛИСТИЧЕСКОЙ УГРОЗЫ"],
+        "combined": ["{r}\nОтбой комбинированной опасности", "{p}\n{r}\nОТБОЙ КОМБИНИРОВАННОЙ УГРОЗЫ"],
         "aviation": ["{p}\n{r}\nОтбой авиационно-ракетно-бомбовой опасности", "{r}\nОтбой авиационной опасности"],
     }
     return _clean(random.choice(templates[t]).format(p=p, r=r))
@@ -228,6 +290,7 @@ def _repeat_message(i: Dict[str, Any]) -> str:
         "artillery": ["{p}\n{r}\nАртиллерийская тревога сохраняется", "{p}\n{r}\nПовторно внимание по артиллерии"],
         "missile": ["{r}\nРакетная опасность сохраняется", "{p}\n{r}\nРАКЕТНАЯ ОПАСНОСТЬ\nПовторно"],
         "ballistic": ["{r}\nБаллистическая опасность сохраняется", "{p}\n{r}\nБАЛЛИСТИЧЕСКАЯ УГРОЗА\nПовторно"],
+        "combined": ["{p}\n{r}\nКомбинированная опасность сохраняется", "{p}\n{r}\nКОМБИНИРОВАННАЯ УГРОЗА\nПовторно"],
         "aviation": ["{p}\n{r}\nАвиационная опасность сохраняется", "{p}\n{r}\nАвиационно-ракетно-бомбовая опасность\nПовторно"],
     }
     return _clean(random.choice(templates[t]).format(p=p, r=r))
@@ -251,12 +314,14 @@ def _expand_message(i: Dict[str, Any], state: Dict[str, Any]) -> str:
         text = f"{zone['region']}\nРасширение баллистической опасности\n{places}\n{_attention(t)}"
     elif t == "aviation":
         text = f"{places}\n{zone['region']}\nРасширение авиационно-ракетно-бомбовой опасности"
+    elif t == "combined":
+        text = f"{places}\n{zone['region']}\nРасширение комбинированной опасности\n{random.choice(COMBINED_ATTACK_TYPES)}"
     elif t == "fpv":
         text = f"{places}\n{zone['region']}\nЛокальное расширение опасности FPV"
     else:
         text = f"{places}\n{zone['region']}\nОпасность по БПЛА\nВероятное смещение {_direction_phrase(zone)}"
     if t in DANGERS_WITH_SIREN:
-        _set_air_alert_next(state, _first_city(places))
+        _set_reaction_posts(state, _first_city(places))
     return _clean(text)
 
 def _combine_message(i: Dict[str, Any]) -> str:
@@ -269,6 +334,8 @@ def _combine_message(i: Dict[str, Any]) -> str:
         return _clean(f"{p}\n{r}\nБаллистическая и ракетная опасность\nПовторно")
     if t == "artillery":
         return _clean(f"{p}\n{r}\nАртиллерийская тревога сохраняется\nПовторно")
+    if t == "combined":
+        return _clean(f"{p}\n{r}\nКомбинированная опасность сохраняется\n{random.choice(COMBINED_ATTACK_TYPES)}")
     return _repeat_message(i)
 
 def _clean(text: str) -> str:
@@ -292,6 +359,10 @@ def generate_event(state_data: Dict[str, Any], commit: bool = True) -> str:
     pending_clear_air = data.pop("pending_clear_air_alert", None)
     if pending_clear_air:
         return _clear_air_alert_message(pending_clear_air, data)
+
+    pending_pvo = data.pop("pending_pvo", None)
+    if pending_pvo:
+        return _pvo_message(pending_pvo, data)
 
     settings = MODE_SETTINGS.get(data.get("mode", "normal"), MODE_SETTINGS["normal"])
     active: List[Dict[str, Any]] = data["active_incidents"]
@@ -339,7 +410,7 @@ def generate_event(state_data: Dict[str, Any], commit: bool = True) -> str:
     text = _new_message(threat, zone, places)
     active.append({"id": uuid.uuid4().hex[:8], "ts": int(time.time()), "age": 0, "zone_key": zone_key, "region": zone["region"], "places_text": places, "threat": threat})
     if threat in DANGERS_WITH_SIREN:
-        _set_air_alert_next(data, _first_city(places))
+        _set_reaction_posts(data, _first_city(places))
     if commit:
         data["active_incidents"] = active[-30:]
     data["last_event_kind"] = "danger" if threat in DANGERS_WITH_SIREN else "text"

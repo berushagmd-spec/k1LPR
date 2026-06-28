@@ -157,6 +157,7 @@ async def help_text(update: Update) -> None:
         "/post_now — сразу пост в канал\n"
         "/post_air Дияма — вручную отправить воздушную тревогу\n"
         "/post_clear_air Дияма — вручную отправить отбой воздушной тревоги\n"
+        "/post_pvo Дияма — вручную отправить работу ПВО\n"
         "/set_air_image air_alert.jpg — путь к картинке тревоги\n"
         "/set_clear_air_image clear_air_alert.jpg — путь к картинке отбоя\n"
         "/set_fast_interval 25 — быстрый интервал в секундах\n"
@@ -166,7 +167,7 @@ async def help_text(update: Update) -> None:
         "/set_interval 1 3 — обычный интервал в минутах\n"
         "/set_channel -1004449922425 — канал\n"
         "/mode calm|normal|hot|chaos — интенсивность\n"
-        "/scenario mixed|bpla|missile|ballistic|aviation|artillery — сценарий\n"
+        "/scenario mixed|bpla|missile|ballistic|aviation|artillery|combined — сценарий\n"
         "/active — активные ветки\n"
         "/clear_active — очистить ветки"
     )
@@ -261,6 +262,16 @@ async def command_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await send_to_channel(context, text)
         schedule_next_post(state, soon=False)
         await update.message.reply_text("Отбой воздушной тревоги отправлен.")
+        return
+
+    if cmd == "post_pvo":
+        place = rest.strip() or "Дияма"
+        text = f"{place}\nРабота ПВО"
+        state.data["last_event_kind"] = "pvo"
+        state.save()
+        await send_to_channel(context, text)
+        schedule_next_post(state, soon=False)
+        await update.message.reply_text("Работа ПВО отправлена.")
         return
 
     if cmd == "custom":
@@ -362,9 +373,9 @@ async def command_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     if cmd == "scenario":
-        allowed = {"mixed", "bpla", "missile", "ballistic", "aviation", "artillery"}
+        allowed = {"mixed", "bpla", "missile", "ballistic", "aviation", "artillery", "combined"}
         if len(args) != 1 or args[0] not in allowed:
-            await update.message.reply_text("Использование: /scenario mixed|bpla|missile|ballistic|aviation|artillery")
+            await update.message.reply_text("Использование: /scenario mixed|bpla|missile|ballistic|aviation|artillery|combined")
             return
         state.data["scenario"] = args[0]
         state.save()
