@@ -68,6 +68,41 @@ def _direction_target(zone: Dict[str, Any]) -> str:
     # "В направлении: Диямская агломерация", а не "Диямскую агломерацию".
     return zone.get("region", "")
 
+
+DIYAM_COMBINED_SUBJECT = "Диямская область и Диямская агломерация"
+
+def _normalize_alert_scope(zone: Dict[str, Any], places_text: str) -> Tuple[str, str]:
+    """
+    Диямская агломерация считается единой зоной тревоги.
+    Если тревога затрагивает Дияму/агломерацию, в посте пишем:
+    "Диямская область и Диямская агломерация".
+    """
+    region = zone.get("region", "")
+    if region == "Диямская агломерация":
+        return "Диямская агломерация", DIYAM_COMBINED_SUBJECT
+    if "Дияма" in places_text:
+        return places_text, DIYAM_COMBINED_SUBJECT
+    return places_text, region
+
+def _air_alert_place(places_text: str, region: str) -> str:
+    if region == DIYAM_COMBINED_SUBJECT or region == "Диямская агломерация" or "Дияма" in places_text:
+        return DIYAM_COMBINED_SUBJECT
+    return _first_city(places_text)
+
+def _active_air_alerts(data: Dict[str, Any]) -> List[str]:
+    alerts = data.setdefault("active_air_alerts", [])
+    if not isinstance(alerts, list):
+        alerts = []
+        data["active_air_alerts"] = alerts
+    return alerts
+
+def _pending_city(data: Dict[str, Any], key: str) -> str:
+    pending = data.get(key)
+    if isinstance(pending, dict):
+        return str(pending.get("city") or pending.get("place") or "")
+    return ""
+
+
 def _origin_for_threat(threat: str) -> str:
     if threat == "ballistic":
         return random.choice(TURBANIA_LAUNCH_REGIONS_BY_THREAT["ballistic"])
@@ -101,33 +136,82 @@ def _attention(threat: str) -> str:
     return ""
 
 def _set_air_alert_next(data: Dict[str, Any], city: str) -> None:
+    city = (city or "").strip()
+    if not city:
+        return
+
+    active_air = _active_air_alerts(data)
+    if city in active_air:
+        # Уже включена — повторно не врубаем.
+        return
+
+    if _pending_city(data, "pending_air_alert") == city:
+        return
+
+    # Если уже ожидается отбой по этой зоне, новую сирену поверх не ставим.
+    if _pending_city(data, "pending_clear_air_alert") == city:
+        return
+
     data["pending_air_alert"] = {"city": city, "ts": int(time.time())}
     data["urgent_next"] = True
 
 def _set_reaction_posts(data: Dict[str, Any], city: str) -> None:
-    # Иногда перед сиреной идет отдельный пост о работе ПВО.
+    city = (city or "").strip()
+    if not city:
+        return
+
+    if city in _active_air_alerts(data):
+        return
+
+    # Иногда сначала отдельный пост ПВО, затем сирена. Не наоборот.
     if random.random() < 0.38:
         _set_pvo_next(data, city)
-        data["pending_air_alert"] = {"city": city, "ts": int(time.time())}
+        _set_air_alert_next(data, city)
     else:
         _set_air_alert_next(data, city)
 
-
 def _set_clear_air_alert_next(data: Dict[str, Any], city: str) -> None:
+    city = (city or "").strip()
+    if not city:
+        return
+
+    # Отбой сирены ставим только если сирена реально была включена
+    # или уже стоит в очереди на включение.
+    active_air = _active_air_alerts(data)
+    pending_air_same = _pending_city(data, "pending_air_alert") == city
+
+    if city not in active_air and not pending_air_same:
+        return
+
+    # Если сирена еще не успела выйти, отменяем ее и не дублируем отбой.
+    if pending_air_same:
+        data.pop("pending_air_alert", None)
+
+    if _pending_city(data, "pending_clear_air_alert") == city:
+        return
+
     data["pending_clear_air_alert"] = {"city": city, "ts": int(time.time())}
     data["urgent_next"] = True
 
 def _air_alert_message(pending: Dict[str, Any], data: Dict[str, Any]) -> str:
     city = pending.get("city", "Дияма")
+    active_air = _active_air_alerts(data)
+    if city not in active_air:
+        active_air.append(city)
     data["last_event_kind"] = "air_alert"
     return f"{city}\n⚠️ВОЗДУШНАЯ ТРЕВОГА⚠️"
 
 def _clear_air_alert_message(pending: Dict[str, Any], data: Dict[str, Any]) -> str:
     city = pending.get("city", "Дияма")
+    active_air = _active_air_alerts(data)
+    data["active_air_alerts"] = [x for x in active_air if x != city]
     data["last_event_kind"] = "clear_air_alert"
     return f"{city}\n✅ОТБОЙ ВОЗДУШНОЙ ТРЕВОГИ✅"
 
 def _set_pvo_next(data: Dict[str, Any], place: str) -> None:
+    place = (place or "").strip()
+    if not place:
+        return
     data["pending_pvo"] = {"place": place, "ts": int(time.time())}
     data["urgent_next"] = True
 
@@ -162,7 +246,8 @@ def _zone_key_by_obj(zone: Dict[str, Any]) -> str:
 
 def _prealert_message(threat: str, zone: Dict[str, Any]) -> Dict[str, Any]:
     target = _direction_target(zone)
-    places = _places_line(zone)
+    raw_places = _places_line(zone)
+    places, region = _normalize_alert_scope(zone, raw_places)
 
     if threat in ("missile", "ballistic"):
         origin = _origin_for_threat(threat)
@@ -206,9 +291,9 @@ def _prealert_message(threat: str, zone: Dict[str, Any]) -> Dict[str, Any]:
         "text": _clean(text),
         "threat": threat,
         "zone_key": _zone_key_by_obj(zone),
-        "region": zone["region"],
+        "region": region,
         "places_text": places,
-        "air_city": _first_city(places),
+        "air_city": _air_alert_place(places, region),
         "ts": int(time.time()),
     }
 
@@ -217,7 +302,7 @@ def _danger_after_prealert(pending: Dict[str, Any], data: Dict[str, Any]) -> str
     region = pending["region"]
     places = pending["places_text"]
     zone_key = pending["zone_key"]
-    city = pending.get("air_city") or _first_city(places)
+    city = pending.get("air_city") or _air_alert_place(places, region)
 
     if threat == "ballistic":
         text = random.choice([
@@ -256,6 +341,8 @@ def _danger_after_prealert(pending: Dict[str, Any], data: Dict[str, Any]) -> str
     })
     data["active_incidents"] = data["active_incidents"][-30:]
     _set_reaction_posts(data, city)
+    if threat == "ballistic":
+        data["urgent_next"] = True
     data["last_event_kind"] = "danger"
     return _clean(text)
 
@@ -303,25 +390,27 @@ def _expand_message(i: Dict[str, Any], state: Dict[str, Any]) -> str:
     if not candidates:
         candidates = list(KURBANIA_ZONES.items())
     key, zone = random.choice(candidates)
-    places = _places_line(zone, 1, 3)
-    i.update({"zone_key": key, "region": zone["region"], "places_text": places, "age": i.get("age", 0) + 1})
+    raw_places = _places_line(zone, 1, 3)
+    places, region = _normalize_alert_scope(zone, raw_places)
+    i.update({"zone_key": key, "region": region, "places_text": places, "age": i.get("age", 0) + 1})
     t = i["threat"]
     if t == "artillery":
-        text = f"{places}\n{zone['region']}\nРасширение артиллерийской тревоги\n{_attention(t)}"
+        text = f"{places}\n{region}\nРасширение артиллерийской тревоги\n{_attention(t)}"
     elif t == "missile":
-        text = f"{zone['region']}\nРасширение ракетной опасности\n{places}"
+        text = f"{region}\nРасширение ракетной опасности\n{places}"
     elif t == "ballistic":
-        text = f"{zone['region']}\nРасширение баллистической опасности\n{places}\n{_attention(t)}"
+        text = f"{region}\nРасширение баллистической опасности\n{places}\n{_attention(t)}"
+        state["urgent_next"] = True
     elif t == "aviation":
-        text = f"{places}\n{zone['region']}\nРасширение авиационно-ракетно-бомбовой опасности"
+        text = f"{places}\n{region}\nРасширение авиационно-ракетно-бомбовой опасности"
     elif t == "combined":
-        text = f"{places}\n{zone['region']}\nРасширение комбинированной опасности\n{random.choice(COMBINED_ATTACK_TYPES)}"
+        text = f"{places}\n{region}\nРасширение комбинированной опасности\n{random.choice(COMBINED_ATTACK_TYPES)}"
     elif t == "fpv":
-        text = f"{places}\n{zone['region']}\nЛокальное расширение опасности FPV"
+        text = f"{places}\n{region}\nЛокальное расширение опасности FPV"
     else:
-        text = f"{places}\n{zone['region']}\nОпасность по БПЛА\nВероятное смещение {_direction_phrase(zone)}"
+        text = f"{places}\n{region}\nОпасность по БПЛА\nВероятное смещение {_direction_phrase(zone)}"
     if t in DANGERS_WITH_SIREN:
-        _set_reaction_posts(state, _first_city(places))
+        _set_reaction_posts(state, _air_alert_place(places, region))
     return _clean(text)
 
 def _combine_message(i: Dict[str, Any]) -> str:
@@ -345,46 +434,75 @@ def _clean(text: str) -> str:
 def generate_event(state_data: Dict[str, Any], commit: bool = True) -> str:
     data = state_data if commit else copy.deepcopy(state_data)
     data.setdefault("active_incidents", [])
+    data.setdefault("active_air_alerts", [])
     data["last_event_kind"] = "text"
 
-    # Приоритет: фиксация -> опасность -> сирена -> отбой сирены
+    # Приоритет: фиксация -> ПВО -> сирена -> отбой сирены.
     pending = data.pop("pending_alert", None)
     if pending:
         return _danger_after_prealert(pending, data)
 
+    pending_pvo = data.pop("pending_pvo", None)
+    if pending_pvo:
+        return _pvo_message(pending_pvo, data)
+
     pending_air = data.pop("pending_air_alert", None)
     if pending_air:
+        city = pending_air.get("city", "")
+        if city in _active_air_alerts(data):
+            # Защита от второго включения той же воздушной тревоги.
+            return generate_event(data, commit=commit)
         return _air_alert_message(pending_air, data)
 
     pending_clear_air = data.pop("pending_clear_air_alert", None)
     if pending_clear_air:
         return _clear_air_alert_message(pending_clear_air, data)
 
-    pending_pvo = data.pop("pending_pvo", None)
-    if pending_pvo:
-        return _pvo_message(pending_pvo, data)
-
     settings = MODE_SETTINGS.get(data.get("mode", "normal"), MODE_SETTINGS["normal"])
     active: List[Dict[str, Any]] = data["active_incidents"]
 
-    if active and random.random() < settings["update_weight"]:
-        incident = random.choice(active)
+    ballistic_active = [x for x in active if x.get("threat") == "ballistic"]
+    update_weight = settings["update_weight"]
+    if ballistic_active:
+        # Баллистика развивается быстрее обычных веток.
+        update_weight = max(update_weight, 0.88)
+
+    if active and random.random() < update_weight:
+        if ballistic_active and random.random() < 0.72:
+            incident = random.choice(ballistic_active)
+        else:
+            incident = random.choice(active)
+
+        clear_chance = settings["clear_chance"]
+        expand_chance = settings["expand_chance"]
+        combine_chance = settings["combine_chance"]
+
+        if incident.get("threat") == "ballistic":
+            # Быстрее доходит до отбоя, меньше долгих повторов.
+            clear_chance = min(0.78, clear_chance + 0.38)
+            expand_chance = min(expand_chance, 0.16)
+            combine_chance = min(combine_chance, 0.08)
+
         roll = random.random()
-        if roll < settings["clear_chance"]:
+        if roll < clear_chance:
             text = _clear_message(incident)
             cleared_threat = incident["threat"]
-            city = _first_city(incident["places_text"])
+            city = _air_alert_place(incident["places_text"], incident["region"])
             active.remove(incident)
             if cleared_threat in DANGERS_WITH_SIREN:
                 _set_clear_air_alert_next(data, city)
-        elif roll < settings["clear_chance"] + settings["expand_chance"]:
+        elif roll < clear_chance + expand_chance:
             text = _expand_message(incident, data)
-        elif roll < settings["clear_chance"] + settings["expand_chance"] + settings["combine_chance"]:
+        elif roll < clear_chance + expand_chance + combine_chance:
             incident["age"] = incident.get("age", 0) + 1
             text = _combine_message(incident)
         else:
             incident["age"] = incident.get("age", 0) + 1
             text = _repeat_message(incident)
+
+        if incident.get("threat") == "ballistic" and incident in active:
+            data["urgent_next"] = True
+
         if commit:
             data["active_incidents"] = active[-30:]
         return text
@@ -406,11 +524,17 @@ def generate_event(state_data: Dict[str, Any], commit: bool = True) -> str:
         data["last_event_kind"] = "prealert"
         return pre["text"]
 
-    places = _places_line(zone)
-    text = _new_message(threat, zone, places)
-    active.append({"id": uuid.uuid4().hex[:8], "ts": int(time.time()), "age": 0, "zone_key": zone_key, "region": zone["region"], "places_text": places, "threat": threat})
+    raw_places = _places_line(zone)
+    places, region = _normalize_alert_scope(zone, raw_places)
+    display_zone = dict(zone)
+    display_zone["region"] = region
+
+    text = _new_message(threat, display_zone, places)
+    active.append({"id": uuid.uuid4().hex[:8], "ts": int(time.time()), "age": 0, "zone_key": zone_key, "region": region, "places_text": places, "threat": threat})
     if threat in DANGERS_WITH_SIREN:
-        _set_reaction_posts(data, _first_city(places))
+        _set_reaction_posts(data, _air_alert_place(places, region))
+    if threat == "ballistic":
+        data["urgent_next"] = True
     if commit:
         data["active_incidents"] = active[-30:]
     data["last_event_kind"] = "danger" if threat in DANGERS_WITH_SIREN else "text"
@@ -421,9 +545,15 @@ def format_active(state_data: Dict[str, Any]) -> str:
     pending = state_data.get("pending_alert")
     pending_air = state_data.get("pending_air_alert")
     pending_clear_air = state_data.get("pending_clear_air_alert")
+    pending_pvo = state_data.get("pending_pvo")
+    active_air = state_data.get("active_air_alerts", [])
     lines = []
+    if active_air:
+        lines.append("Включенные воздушные тревоги: " + ", ".join(active_air))
     if pending:
         lines.append(f"Следующий пост: опасность после фиксации / {pending.get('threat')} / {pending.get('region')} / {pending.get('places_text')}")
+    if pending_pvo:
+        lines.append(f"Следующий пост: работа ПВО / {pending_pvo.get('place')}")
     if pending_air:
         lines.append(f"Следующий пост: воздушная тревога / {pending_air.get('city')}")
     if pending_clear_air:

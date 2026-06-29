@@ -218,7 +218,8 @@ async def command_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             f"Сценарий: {data.get('scenario')}\n"
             f"Картинка воздушной тревоги: {img or 'не задана'} / {'найдена' if img_exists else 'не найдена'}\n"
             f"Картинка отбоя тревоги: {clear_img or 'не задана'} / {'найдена' if clear_img_exists else 'не найдена'}\n"
-            f"Активных веток: {len(data.get('active_incidents', []))}"
+            f"Активных веток: {len(data.get('active_incidents', []))}\n"
+            f"Включенные воздушные тревоги: {', '.join(data.get('active_air_alerts', [])) or 'нет'}"
         )
         return
 
@@ -248,6 +249,9 @@ async def command_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         city = rest.strip() or "Дияма"
         text = f"{city}\n⚠️ВОЗДУШНАЯ ТРЕВОГА⚠️"
         state.data["last_event_kind"] = "air_alert"
+        alerts = state.data.setdefault("active_air_alerts", [])
+        if city not in alerts:
+            alerts.append(city)
         state.save()
         await send_to_channel(context, text)
         schedule_next_post(state, soon=False)
@@ -258,6 +262,7 @@ async def command_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         city = rest.strip() or "Дияма"
         text = f"{city}\n✅ОТБОЙ ВОЗДУШНОЙ ТРЕВОГИ✅"
         state.data["last_event_kind"] = "clear_air_alert"
+        state.data["active_air_alerts"] = [x for x in state.data.get("active_air_alerts", []) if x != city]
         state.save()
         await send_to_channel(context, text)
         schedule_next_post(state, soon=False)
@@ -409,6 +414,7 @@ def build_application() -> Application:
         "clear_air_alert_image_path": config.clear_air_alert_image_path,
         "clear_air_alert_as_photo": config.clear_air_alert_as_photo,
         "active_incidents": [],
+        "active_air_alerts": [],
         "last_posts": [],
         "last_event_kind": "text",
         "next_post_at": int(time.time()) + 5,

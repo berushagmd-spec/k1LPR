@@ -36,8 +36,10 @@ class BotState:
 
     def clear_active(self) -> None:
         self.data["active_incidents"] = []
+        self.data["active_air_alerts"] = []
         self.data.pop("pending_alert", None)
         self.data.pop("pending_air_alert", None)
         self.data.pop("pending_clear_air_alert", None)
+        self.data.pop("pending_pvo", None)
         self.data.pop("urgent_next", None)
         self.save()
